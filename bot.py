@@ -4,11 +4,11 @@ import sqlite3
 import os
 import time
 
-TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = "8210579716:AAGtgHEAz3IDcB2mQH9T92Cg7zpSKG1zPj8"
 bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
 
 # ====== SUPER ADMIN ======
-SUPER_ADMIN = 123456789  # <-- O'ZINGNI ID yoz
+SUPER_ADMIN = 1331356868 # <-- O'ZINGNI ID yoz
 
 # ====== DATABASE ======
 conn = sqlite3.connect("database.db", check_same_thread=False)
