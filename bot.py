@@ -4,11 +4,11 @@ import sqlite3
 import os
 import time
 
-TOKEN = "8210579716:AAGtgHEAz3IDcB2mQH9T92Cg7zpSKG1zPj8"
+TOKEN = os.getenv("BOT_TOKEN")
 bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
 
 # ====== SUPER ADMIN ======
-SUPER_ADMIN = 1331356868 # <-- O'ZINGNI ID yoz
+SUPER_ADMIN = 123456789  # <-- O'ZINGNI ID yoz
 
 # ====== DATABASE ======
 conn = sqlite3.connect("database.db", check_same_thread=False)
@@ -405,5 +405,22 @@ def delete_admin(call):
 
     bot.send_message(call.message.chat.id, "🗑 Admin o‘chirildi")
     print("🚀 Production Bot ishga tushdi...")
-bot.infinity_polling(skip_pending=True)
-  
+from flask import Flask, request
+
+app = Flask(__name__)
+
+@app.route(f"/{TOKEN}", methods=["POST"])
+def webhook():
+    json_str = request.get_data().decode("UTF-8")
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return "ok", 200
+
+@app.route("/")
+def index():
+    return "Bot ishlayapti"
+
+if __name__ == "__main__":
+    bot.remove_webhook()
+    bot.set_webhook(url=f"https://minecraft-mod-cgix.onrender.com{TOKEN}")
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
