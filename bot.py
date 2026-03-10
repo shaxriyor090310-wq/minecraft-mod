@@ -1,10 +1,10 @@
 import telebot
 from telebot import types
 import sqlite3
-import os
+import time
 from flask import Flask, request
 
-TOKEN = os.getenv("8210579716:AAGtgHEAz3IDcB2mQH9T92Cg7zpSKG1zPj8")
+TOKEN = "8210579716:AAGtgHEAz3IDcB2mQH9T92Cg7zpSKG1zPj8"
 
 bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
 
@@ -19,15 +19,19 @@ cursor.execute("CREATE TABLE IF NOT EXISTS channels(username TEXT)")
 cursor.execute("CREATE TABLE IF NOT EXISTS categories(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT)")
 cursor.execute("CREATE TABLE IF NOT EXISTS items(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT,cat_id INTEGER)")
 cursor.execute("CREATE TABLE IF NOT EXISTS apks(id INTEGER PRIMARY KEY AUTOINCREMENT,item_id INTEGER,file_id TEXT,photo_id TEXT,caption TEXT)")
+
 conn.commit()
 
 state = {}
 
 def is_admin(uid):
+
     if uid == SUPER_ADMIN:
         return True
+
     cursor.execute("SELECT id FROM admins WHERE id=?", (uid,))
     return cursor.fetchone()
+
 
 def check_sub(uid):
 
@@ -70,6 +74,7 @@ def start(m):
 
     show_categories(m.chat.id)
 
+
 def show_categories(chat):
 
     markup = types.InlineKeyboardMarkup()
@@ -85,6 +90,7 @@ def show_categories(chat):
         ))
 
     bot.send_message(chat,"📂 Kategoriya tanlang",reply_markup=markup)
+
 
 @bot.callback_query_handler(func=lambda c:c.data.startswith("cat_"))
 def category(c):
@@ -104,6 +110,7 @@ def category(c):
         ))
 
     bot.send_message(c.message.chat.id,"📦 Tanlang",reply_markup=markup)
+
 
 @bot.callback_query_handler(func=lambda c:c.data.startswith("item_"))
 def item(c):
@@ -128,9 +135,10 @@ def admin(m):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
 
     markup.row("➕ Kategoriya","🗑 Kategoriya")
-    markup.row("➕ Element","➕ APK")
-    markup.row("📡 Kanallar","📢 Broadcast")
-    markup.row("📊 Statistika","👥 Adminlar")
+    markup.row("✏️ Edit","➕ Element")
+    markup.row("➕ APK","📡 Kanallar")
+    markup.row("📢 Broadcast","📊 Statistika")
+    markup.row("👥 Adminlar")
 
     bot.send_message(m.chat.id,"👑 Admin panel",reply_markup=markup)
 
@@ -152,8 +160,6 @@ def stats(m):
 📂 Kategoriya: {cats}
 📦 Element: {items}
 """)
-
-
 @bot.message_handler(func=lambda m:m.text=="📢 Broadcast")
 def bc(m):
 
@@ -178,45 +184,19 @@ def states(m):
         for u in users:
 
             try:
+
                 bot.send_message(u[0],m.text)
+
                 sent += 1
+
+                time.sleep(0.05)
+
             except:
                 pass
 
         bot.send_message(m.chat.id,f"Yuborildi {sent}")
 
         del state[m.from_user.id]
-        @bot.message_handler(func=lambda m:m.text=="👥 Adminlar")
-def admin_menu(m):
-
-    if m.from_user.id != SUPER_ADMIN:
-        return
-
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-
-    markup.row("➕ Admin","🗑 Admin")
-    markup.row("📋 Adminlar")
-
-    bot.send_message(m.chat.id,"Admin boshqaruvi",reply_markup=markup)
-
-
-@bot.message_handler(func=lambda m:m.text=="➕ Admin")
-def add_admin(m):
-
-    state[m.from_user.id] = "add_admin"
-
-    bot.send_message(m.chat.id,"Admin ID yubor")
-
-
-@bot.message_handler(func=lambda m:m.from_user.id in state and state[m.from_user.id]=="add_admin")
-def save_admin(m):
-
-    cursor.execute("INSERT INTO admins VALUES(?)",(m.text,))
-    conn.commit()
-
-    bot.send_message(m.chat.id,"Admin qo‘shildi")
-
-    del state[m.from_user.id]
 
 
 app = Flask(__name__)
@@ -242,11 +222,10 @@ if __name__ == "__main__":
     bot.remove_webhook()
 
     bot.set_webhook(
-        url="https://minecraft-mod-cgix.onrender.com" + TOKEN
+        url="https://minecraft-mod-cgix.onrender.com/"+TOKEN
     )
 
     app.run(
         host="0.0.0.0",
-        port=int(os.environ.get("PORT",10000))
+        port=10000
     )
-    
