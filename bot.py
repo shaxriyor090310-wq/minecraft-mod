@@ -2,230 +2,339 @@ import telebot
 from telebot import types
 import sqlite3
 import time
-from flask import Flask, request
 
 TOKEN = "8210579716:AAGtgHEAz3IDcB2mQH9T92Cg7zpSKG1zPj8"
+OWNER_ID = 1331356868
 
 bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
 
-SUPER_ADMIN = 1331356868
+db = sqlite3.connect("bot.db", check_same_thread=False)
+cur = db.cursor()
 
-conn = sqlite3.connect("bot.db", check_same_thread=False)
-cursor = conn.cursor()
+cur.execute("CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, join_time INTEGER)")
+cur.execute("CREATE TABLE IF NOT EXISTS admins(id INTEGER PRIMARY KEY)")
+cur.execute("CREATE TABLE IF NOT EXISTS mods(code INTEGER PRIMARY KEY, photo TEXT, text TEXT, file TEXT)")
+cur.execute("CREATE TABLE IF NOT EXISTS channels(id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT)")
 
-cursor.execute("CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY)")
-cursor.execute("CREATE TABLE IF NOT EXISTS admins(id INTEGER PRIMARY KEY)")
-cursor.execute("CREATE TABLE IF NOT EXISTS channels(username TEXT)")
-cursor.execute("CREATE TABLE IF NOT EXISTS categories(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT)")
-cursor.execute("CREATE TABLE IF NOT EXISTS items(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT,cat_id INTEGER)")
-cursor.execute("CREATE TABLE IF NOT EXISTS apks(id INTEGER PRIMARY KEY AUTOINCREMENT,item_id INTEGER,file_id TEXT,photo_id TEXT,caption TEXT)")
+cur.execute("INSERT OR IGNORE INTO admins VALUES(?)",(OWNER_ID,))
 
-conn.commit()
+cur.execute("CREATE INDEX IF NOT EXISTS idx_users ON users(id)")
+cur.execute("CREATE INDEX IF NOT EXISTS idx_mods ON mods(code)")
 
-state = {}
+db.commit()
+
 
 def is_admin(uid):
-
-    if uid == SUPER_ADMIN:
-        return True
-
-    cursor.execute("SELECT id FROM admins WHERE id=?", (uid,))
-    return cursor.fetchone()
+    cur.execute("SELECT 1 FROM admins WHERE id=?",(uid,))
+    return cur.fetchone()
 
 
-def check_sub(uid):
+def add_user(uid):
+    cur.execute("INSERT OR IGNORE INTO users VALUES(?,?)",(uid,int(time.time())))
+    db.commit()
 
-    cursor.execute("SELECT username FROM channels")
-    ch = cursor.fetchall()
 
-    for c in ch:
+def get_channels():
+    cur.execute("SELECT username FROM channels")
+    return [x[0] for x in cur.fetchall()]
 
+
+def check_sub(user_id):
+
+    channels = get_channels()
+
+    for ch in channels:
         try:
-
-            m = bot.get_chat_member(c[0], uid)
-
-            if m.status not in ["member","administrator","creator"]:
+            member = bot.get_chat_member(ch,user_id)
+            if member.status in ["left","kicked"]:
                 return False
-
         except:
             return False
 
     return True
-    @bot.message_handler(commands=["start"])
-def start(m):
 
-    uid = m.from_user.id
 
-    cursor.execute("INSERT OR IGNORE INTO users VALUES(?)",(uid,))
-    conn.commit()
+def sub_keyboard():
 
-    if not check_sub(uid):
+    kb = types.InlineKeyboardMarkup()
 
-        cursor.execute("SELECT username FROM channels")
-        ch = cursor.fetchall()
+    for ch in get_channels():
+        kb.add(types.InlineKeyboardButton("🔗 "+ch,url="https://t.me/"+ch.replace("@","")))
 
-        text = "❌ Avval kanallarga obuna bo‘ling\n\n"
+    kb.add(types.InlineKeyboardButton("✅ Tekshirish",callback_data="check_sub"))
 
-        for i in ch:
-            text += f"{i[0]}\n"
+    return kb
 
-        bot.send_message(m.chat.id,text)
+
+@bot.callback_query_handler(func=lambda c:c.data=="check_sub")
+def check_sub_callback(call):
+
+    if check_sub(call.from_user.id):
+        bot.answer_callback_query(call.id,"✅ Obuna tasdiqlandi")
+        bot.send_message(call.message.chat.id,"Mod kodini yuboring")
+    else:
+        bot.answer_callback_query(call.id,"❌ Hali obuna bo‘lmagansiz")
+
+
+@bot.message_handler(commands=['start'])
+def start(message):
+
+    add_user(message.from_user.id)
+
+    if not check_sub(message.from_user.id):
+
+        bot.send_message(
+            message.chat.id,
+            "🔒 Botdan foydalanish uchun kanallarga obuna bo‘ling",
+            reply_markup=sub_keyboard()
+        )
         return
 
-    show_categories(m.chat.id)
+    bot.send_message(message.chat.id,"🎮 Minecraft mod bot\n\nMod kodini yuboring")
 
 
-def show_categories(chat):
+@bot.message_handler(commands=['admin'])
+def admin_panel(message):
 
-    markup = types.InlineKeyboardMarkup()
-
-    cursor.execute("SELECT * FROM categories")
-    cats = cursor.fetchall()
-
-    for c in cats:
-
-        markup.add(types.InlineKeyboardButton(
-            c[1],
-            callback_data=f"cat_{c[0]}"
-        ))
-
-    bot.send_message(chat,"📂 Kategoriya tanlang",reply_markup=markup)
-
-
-@bot.callback_query_handler(func=lambda c:c.data.startswith("cat_"))
-def category(c):
-
-    cid = c.data.split("_")[1]
-
-    markup = types.InlineKeyboardMarkup()
-
-    cursor.execute("SELECT * FROM items WHERE cat_id=?",(cid,))
-    items = cursor.fetchall()
-
-    for i in items:
-
-        markup.add(types.InlineKeyboardButton(
-            i[1],
-            callback_data=f"item_{i[0]}"
-        ))
-
-    bot.send_message(c.message.chat.id,"📦 Tanlang",reply_markup=markup)
-
-
-@bot.callback_query_handler(func=lambda c:c.data.startswith("item_"))
-def item(c):
-
-    iid = c.data.split("_")[1]
-
-    cursor.execute("SELECT * FROM apks WHERE item_id=?",(iid,))
-    f = cursor.fetchone()
-
-    if not f:
-        bot.send_message(c.message.chat.id,"❌ APK yo‘q")
+    if not is_admin(message.from_user.id):
         return
 
-    bot.send_photo(c.message.chat.id,f[3],caption=f[4])
-    bot.send_document(c.message.chat.id,f[2])
-    @bot.message_handler(commands=["admin"])
-def admin(m):
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
 
-    if not is_admin(m.from_user.id):
-        return
+    kb.row("➕ Mod qo'shish","🗑 Mod o'chirish")
+    kb.row("📊 Statistika","👥 Foydalanuvchilar")
+    kb.row("📢 Broadcast")
+    kb.row("➕ Kanal qo'shish","🗑 Kanal o'chirish")
+    kb.row("➕ Admin qo'shish","🗑 Admin o'chirish")
 
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-
-    markup.row("➕ Kategoriya","🗑 Kategoriya")
-    markup.row("✏️ Edit","➕ Element")
-    markup.row("➕ APK","📡 Kanallar")
-    markup.row("📢 Broadcast","📊 Statistika")
-    markup.row("👥 Adminlar")
-
-    bot.send_message(m.chat.id,"👑 Admin panel",reply_markup=markup)
+    bot.send_message(message.chat.id,"👑 Admin panel",reply_markup=kb)
 
 
 @bot.message_handler(func=lambda m:m.text=="📊 Statistika")
-def stats(m):
+def stats(message):
 
-    cursor.execute("SELECT COUNT(*) FROM users")
-    users = cursor.fetchone()[0]
-
-    cursor.execute("SELECT COUNT(*) FROM categories")
-    cats = cursor.fetchone()[0]
-
-    cursor.execute("SELECT COUNT(*) FROM items")
-    items = cursor.fetchone()[0]
-
-    bot.send_message(m.chat.id,f"""
-👥 Userlar: {users}
-📂 Kategoriya: {cats}
-📦 Element: {items}
-""")
-@bot.message_handler(func=lambda m:m.text=="📢 Broadcast")
-def bc(m):
-
-    if not is_admin(m.from_user.id):
+    if not is_admin(message.from_user.id):
         return
 
-    state[m.from_user.id] = "broadcast"
+    cur.execute("SELECT COUNT(*) FROM users")
+    users = cur.fetchone()[0]
 
-    bot.send_message(m.chat.id,"Xabar yuboring")
+    cur.execute("SELECT COUNT(*) FROM mods")
+    mods = cur.fetchone()[0]
 
-
-@bot.message_handler(func=lambda m:m.from_user.id in state)
-def states(m):
-
-    if state[m.from_user.id] == "broadcast":
-
-        cursor.execute("SELECT id FROM users")
-        users = cursor.fetchall()
-
-        sent = 0
-
-        for u in users:
-
-            try:
-
-                bot.send_message(u[0],m.text)
-
-                sent += 1
-
-                time.sleep(0.05)
-
-            except:
-                pass
-
-        bot.send_message(m.chat.id,f"Yuborildi {sent}")
-
-        del state[m.from_user.id]
+    bot.send_message(message.chat.id,f"👥 Userlar: {users}\n📦 Modlar: {mods}")
 
 
-app = Flask(__name__)
+@bot.message_handler(func=lambda m:m.text=="👥 Foydalanuvchilar")
+def users_list(message):
 
-@app.route(f"/{TOKEN}",methods=["POST"])
-def webhook():
+    if not is_admin(message.from_user.id):
+        return
 
-    json_str = request.get_data().decode("UTF-8")
-    update = telebot.types.Update.de_json(json_str)
+    cur.execute("SELECT id FROM users LIMIT 50")
+    users = cur.fetchall()
 
-    bot.process_new_updates([update])
+    text="👥 Oxirgi foydalanuvchilar:\n\n"
 
-    return "ok",200
+    for u in users:
+        text+=str(u[0])+"\n"
 
-
-@app.route("/")
-def index():
-    return "Bot ishlayapti"
+    bot.send_message(message.chat.id,text)
 
 
-if __name__ == "__main__":
+@bot.message_handler(func=lambda m:m.text=="➕ Kanal qo'shish")
+def add_channel(message):
 
-    bot.remove_webhook()
+    if not is_admin(message.from_user.id):
+        return
 
-    bot.set_webhook(
-        url="https://minecraft-mod-cgix.onrender.com/"+TOKEN
-    )
+    msg = bot.send_message(message.chat.id,"@kanal username yuboring")
+    bot.register_next_step_handler(msg,save_channel)
 
-    app.run(
-        host="0.0.0.0",
-        port=10000
-    )
+
+def save_channel(message):
+
+    username = message.text
+
+    cur.execute("INSERT INTO channels(username) VALUES(?)",(username,))
+    db.commit()
+
+    bot.send_message(message.chat.id,"✅ Kanal qo'shildi")
+
+
+@bot.message_handler(func=lambda m:m.text=="🗑 Kanal o'chirish")
+def del_channel(message):
+
+    if not is_admin(message.from_user.id):
+        return
+
+    msg = bot.send_message(message.chat.id,"O'chiriladigan kanal username yuboring")
+    bot.register_next_step_handler(msg,delete_channel)
+
+
+def delete_channel(message):
+
+    username = message.text
+
+    cur.execute("DELETE FROM channels WHERE username=?",(username,))
+    db.commit()
+
+    bot.send_message(message.chat.id,"🗑 Kanal o'chirildi")
+
+
+@bot.message_handler(func=lambda m:m.text=="➕ Admin qo'shish")
+def add_admin(message):
+
+    if not is_admin(message.from_user.id):
+        return
+
+    msg = bot.send_message(message.chat.id,"Admin ID yuboring")
+    bot.register_next_step_handler(msg,save_admin)
+
+
+def save_admin(message):
+
+    admin_id = int(message.text)
+
+    cur.execute("INSERT OR IGNORE INTO admins VALUES(?)",(admin_id,))
+    db.commit()
+
+    bot.send_message(message.chat.id,"✅ Admin qo'shildi")
+
+
+@bot.message_handler(func=lambda m:m.text=="🗑 Admin o'chirish")
+def del_admin(message):
+
+    if not is_admin(message.from_user.id):
+        return
+
+    msg = bot.send_message(message.chat.id,"O'chiriladigan admin ID yuboring")
+    bot.register_next_step_handler(msg,delete_admin)
+
+
+def delete_admin(message):
+
+    admin_id = int(message.text)
+
+    cur.execute("DELETE FROM admins WHERE id=?",(admin_id,))
+    db.commit()
+
+    bot.send_message(message.chat.id,"🗑 Admin o'chirildi")
+
+
+@bot.message_handler(func=lambda m:m.text=="➕ Mod qo'shish")
+def add_mod(message):
+
+    if not is_admin(message.from_user.id):
+        return
+
+    msg = bot.send_message(message.chat.id,"Mod kodini yuboring")
+    bot.register_next_step_handler(msg,mod_code)
+
+
+def mod_code(message):
+
+    code=int(message.text)
+
+    msg = bot.send_message(message.chat.id,"Rasm yuboring")
+    bot.register_next_step_handler(msg,mod_photo,code)
+
+
+def mod_photo(message,code):
+
+    photo=message.photo[-1].file_id
+
+    msg = bot.send_message(message.chat.id,"Tavsif yuboring")
+    bot.register_next_step_handler(msg,mod_text,code,photo)
+
+
+def mod_text(message,code,photo):
+
+    text=message.text
+
+    msg = bot.send_message(message.chat.id,"Mod fayl yuboring")
+    bot.register_next_step_handler(msg,mod_file,code,photo,text)
+
+
+def mod_file(message,code,photo,text):
+
+    file_id=message.document.file_id
+
+    cur.execute("INSERT OR REPLACE INTO mods VALUES(?,?,?,?)",(code,photo,text,file_id))
+    db.commit()
+
+    bot.send_message(message.chat.id,"✅ Mod qo'shildi")
+
+
+@bot.message_handler(func=lambda m:m.text=="🗑 Mod o'chirish")
+def del_mod(message):
+
+    if not is_admin(message.from_user.id):
+        return
+
+    msg = bot.send_message(message.chat.id,"Mod kodini yuboring")
+    bot.register_next_step_handler(msg,delete_mod)
+
+
+def delete_mod(message):
+
+    code=int(message.text)
+
+    cur.execute("DELETE FROM mods WHERE code=?",(code,))
+    db.commit()
+
+    bot.send_message(message.chat.id,"🗑 Mod o'chirildi")
+
+
+@bot.message_handler(func=lambda m:m.text=="📢 Broadcast")
+def broadcast(message):
+
+    if not is_admin(message.from_user.id):
+        return
+
+    msg = bot.send_message(message.chat.id,"Xabar yuboring")
+    bot.register_next_step_handler(msg,send_all)
+
+
+def send_all(message):
+
+    cur.execute("SELECT id FROM users")
+    users = cur.fetchall()
+
+    for u in users:
+        try:
+            bot.send_message(u[0],message.text)
+        except:
+            pass
+
+    bot.send_message(message.chat.id,"✅ Yuborildi")
+
+
+@bot.message_handler(func=lambda m:m.text.isdigit())
+def send_mod(message):
+
+    if not check_sub(message.from_user.id):
+
+        bot.send_message(
+            message.chat.id,
+            "🔒 Kanallarga obuna bo‘ling",
+            reply_markup=sub_keyboard()
+        )
+        return
+
+    code=int(message.text)
+
+    cur.execute("SELECT photo,text,file FROM mods WHERE code=?",(code,))
+    mod=cur.fetchone()
+
+    if not mod:
+        bot.send_message(message.chat.id,"❌ Mod topilmadi")
+        return
+
+    photo,text,file_id = mod
+
+    bot.send_photo(message.chat.id,photo,caption=text)
+    bot.send_document(message.chat.id,file_id)
+
+
+bot.infinity_polling()
