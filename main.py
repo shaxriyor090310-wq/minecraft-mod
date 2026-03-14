@@ -313,3 +313,16 @@ bot.set_webhook(url="https://minecraft-mod-3.onrender.com/"+TOKEN)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+@app.route(f'/{TOKEN}', methods=['POST'])
+def webhook():
+    json_str = request.get_data().decode('UTF-8')
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return "OK", 200
+
+
+@app.route('/')
+def index():
+    return "Bot ishlayapti", 200
+    if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
