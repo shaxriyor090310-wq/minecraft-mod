@@ -2,11 +2,14 @@ import telebot
 from telebot import types
 import sqlite3
 import time
+from flask import Flask, request
 
 TOKEN = "8210579716:AAGtgHEAz3IDcB2mQH9T92Cg7zpSKG1zPj8"
 OWNER_ID = 1331356868
 
 bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
+
+app = Flask(__name__)
 
 db = sqlite3.connect("bot.db", check_same_thread=False)
 cur = db.cursor()
@@ -17,10 +20,6 @@ cur.execute("CREATE TABLE IF NOT EXISTS mods(code INTEGER PRIMARY KEY, photo TEX
 cur.execute("CREATE TABLE IF NOT EXISTS channels(id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT)")
 
 cur.execute("INSERT OR IGNORE INTO admins VALUES(?)",(OWNER_ID,))
-
-cur.execute("CREATE INDEX IF NOT EXISTS idx_users ON users(id)")
-cur.execute("CREATE INDEX IF NOT EXISTS idx_mods ON mods(code)")
-
 db.commit()
 
 
@@ -41,9 +40,7 @@ def get_channels():
 
 def check_sub(user_id):
 
-    channels = get_channels()
-
-    for ch in channels:
+    for ch in get_channels():
         try:
             member = bot.get_chat_member(ch,user_id)
             if member.status in ["left","kicked"]:
@@ -125,103 +122,6 @@ def stats(message):
     bot.send_message(message.chat.id,f"👥 Userlar: {users}\n📦 Modlar: {mods}")
 
 
-@bot.message_handler(func=lambda m:m.text=="👥 Foydalanuvchilar")
-def users_list(message):
-
-    if not is_admin(message.from_user.id):
-        return
-
-    cur.execute("SELECT id FROM users LIMIT 50")
-    users = cur.fetchall()
-
-    text="👥 Oxirgi foydalanuvchilar:\n\n"
-
-    for u in users:
-        text+=str(u[0])+"\n"
-
-    bot.send_message(message.chat.id,text)
-
-
-@bot.message_handler(func=lambda m:m.text=="➕ Kanal qo'shish")
-def add_channel(message):
-
-    if not is_admin(message.from_user.id):
-        return
-
-    msg = bot.send_message(message.chat.id,"@kanal username yuboring")
-    bot.register_next_step_handler(msg,save_channel)
-
-
-def save_channel(message):
-
-    username = message.text
-
-    cur.execute("INSERT INTO channels(username) VALUES(?)",(username,))
-    db.commit()
-
-    bot.send_message(message.chat.id,"✅ Kanal qo'shildi")
-
-
-@bot.message_handler(func=lambda m:m.text=="🗑 Kanal o'chirish")
-def del_channel(message):
-
-    if not is_admin(message.from_user.id):
-        return
-
-    msg = bot.send_message(message.chat.id,"O'chiriladigan kanal username yuboring")
-    bot.register_next_step_handler(msg,delete_channel)
-
-
-def delete_channel(message):
-
-    username = message.text
-
-    cur.execute("DELETE FROM channels WHERE username=?",(username,))
-    db.commit()
-
-    bot.send_message(message.chat.id,"🗑 Kanal o'chirildi")
-
-
-@bot.message_handler(func=lambda m:m.text=="➕ Admin qo'shish")
-def add_admin(message):
-
-    if not is_admin(message.from_user.id):
-        return
-
-    msg = bot.send_message(message.chat.id,"Admin ID yuboring")
-    bot.register_next_step_handler(msg,save_admin)
-
-
-def save_admin(message):
-
-    admin_id = int(message.text)
-
-    cur.execute("INSERT OR IGNORE INTO admins VALUES(?)",(admin_id,))
-    db.commit()
-
-    bot.send_message(message.chat.id,"✅ Admin qo'shildi")
-
-
-@bot.message_handler(func=lambda m:m.text=="🗑 Admin o'chirish")
-def del_admin(message):
-
-    if not is_admin(message.from_user.id):
-        return
-
-    msg = bot.send_message(message.chat.id,"O'chiriladigan admin ID yuboring")
-    bot.register_next_step_handler(msg,delete_admin)
-
-
-def delete_admin(message):
-
-    admin_id = int(message.text)
-
-    cur.execute("DELETE FROM admins WHERE id=?",(admin_id,))
-    db.commit()
-
-    bot.send_message(message.chat.id,"🗑 Admin o'chirildi")
-
-
 @bot.message_handler(func=lambda m:m.text=="➕ Mod qo'shish")
 def add_mod(message):
 
@@ -266,50 +166,6 @@ def mod_file(message,code,photo,text):
     bot.send_message(message.chat.id,"✅ Mod qo'shildi")
 
 
-@bot.message_handler(func=lambda m:m.text=="🗑 Mod o'chirish")
-def del_mod(message):
-
-    if not is_admin(message.from_user.id):
-        return
-
-    msg = bot.send_message(message.chat.id,"Mod kodini yuboring")
-    bot.register_next_step_handler(msg,delete_mod)
-
-
-def delete_mod(message):
-
-    code=int(message.text)
-
-    cur.execute("DELETE FROM mods WHERE code=?",(code,))
-    db.commit()
-
-    bot.send_message(message.chat.id,"🗑 Mod o'chirildi")
-
-
-@bot.message_handler(func=lambda m:m.text=="📢 Broadcast")
-def broadcast(message):
-
-    if not is_admin(message.from_user.id):
-        return
-
-    msg = bot.send_message(message.chat.id,"Xabar yuboring")
-    bot.register_next_step_handler(msg,send_all)
-
-
-def send_all(message):
-
-    cur.execute("SELECT id FROM users")
-    users = cur.fetchall()
-
-    for u in users:
-        try:
-            bot.send_message(u[0],message.text)
-        except:
-            pass
-
-    bot.send_message(message.chat.id,"✅ Yuborildi")
-
-
 @bot.message_handler(func=lambda m:m.text.isdigit())
 def send_mod(message):
 
@@ -337,4 +193,21 @@ def send_mod(message):
     bot.send_document(message.chat.id,file_id)
 
 
-bot.infinity_polling()
+@app.route('/'+TOKEN, methods=['POST'])
+def webhook():
+    json_str = request.get_data().decode('UTF-8')
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return 'ok', 200
+
+
+@app.route('/')
+def index():
+    return "Bot ishlayapti"
+
+
+bot.remove_webhook()
+bot.set_webhook(url="https://minecraft-mod-1.onrender.com/"+TOKEN)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
