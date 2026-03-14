@@ -1,6 +1,6 @@
 import telebot
 from telebot import types
-import os
+import sqlite3
 import time
 from flask import Flask, request
 
@@ -9,23 +9,23 @@ OWNER_ID = 1331356868
 
 bot = telebot.TeleBot(TOKEN)
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+app = Flask(__name__)
 
-db = psycopg2.connect(DATABASE_URL)
+db = sqlite3.connect("bot.db", check_same_thread=False)
 cur = db.cursor()
 
 cur.execute("""
 CREATE TABLE IF NOT EXISTS users(
-id BIGINT PRIMARY KEY,
+id INTEGER PRIMARY KEY,
 username TEXT,
 name TEXT,
-join_time BIGINT
+join_time INTEGER
 )
 """)
 
 cur.execute("""
 CREATE TABLE IF NOT EXISTS admins(
-id BIGINT PRIMARY KEY
+id INTEGER PRIMARY KEY
 )
 """)
 
@@ -40,89 +40,54 @@ file TEXT
 
 cur.execute("""
 CREATE TABLE IF NOT EXISTS channels(
-id SERIAL PRIMARY KEY,
+id INTEGER PRIMARY KEY AUTOINCREMENT,
 username TEXT
 )
 """)
 
-cur.execute("INSERT INTO admins VALUES(%s) ON CONFLICT DO NOTHING",(OWNER_ID,))
+cur.execute("INSERT OR IGNORE INTO admins VALUES(?)",(OWNER_ID,))
 
 db.commit()
 
-app = Flask(__name__)
-
-
 def is_admin(uid):
-
-    cur.execute("SELECT 1 FROM admins WHERE id=%s",(uid,))
+    cur.execute("SELECT 1 FROM admins WHERE id=?",(uid,))
     return cur.fetchone()
 
-
 def add_user(user):
-
     cur.execute(
-        "INSERT INTO users VALUES(%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+        "INSERT OR IGNORE INTO users VALUES(?,?,?,?)",
         (user.id,user.username,user.first_name,int(time.time()))
     )
-
     db.commit()
 
-
 def get_channels():
-
     cur.execute("SELECT username FROM channels")
-
     return [x[0] for x in cur.fetchall()]
 
-
 def check_sub(user_id):
-
     for ch in get_channels():
-
         try:
-
             member = bot.get_chat_member(ch,user_id)
-
             if member.status in ["left","kicked"]:
                 return False
-
         except:
             return False
-
     return True
 
-
 def sub_keyboard():
-
     kb = types.InlineKeyboardMarkup()
-
     for ch in get_channels():
-
-        kb.add(
-            types.InlineKeyboardButton(
-                ch,
-                url="https://t.me/"+ch.replace("@","")
-            )
-        )
-
-    kb.add(types.InlineKeyboardButton("✅ Tekshirish",callback_data="check"))
-
+        kb.add(types.InlineKeyboardButton(ch,url="https://t.me/"+ch.replace("@","")))
+    kb.add(types.InlineKeyboardButton("✅ Tekshirish",callback_data="check_sub"))
     return kb
 
-
-@bot.callback_query_handler(func=lambda c:c.data=="check")
-def check(call):
-
+@bot.callback_query_handler(func=lambda c:c.data=="check_sub")
+def check_sub_callback(call):
     if check_sub(call.from_user.id):
-
         bot.answer_callback_query(call.id,"Tasdiqlandi")
-
         bot.send_message(call.message.chat.id,"Mod kodini yuboring")
-
     else:
-
         bot.answer_callback_query(call.id,"Avval obuna bo‘ling")
-
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -130,17 +95,14 @@ def start(message):
     add_user(message.from_user)
 
     if not check_sub(message.from_user.id):
-
         bot.send_message(
             message.chat.id,
             "Botdan foydalanish uchun kanallarga obuna bo‘ling",
             reply_markup=sub_keyboard()
         )
-
         return
 
     bot.send_message(message.chat.id,"Minecraft mod bot\n\nMod kodini yuboring")
-
 
 @bot.message_handler(commands=['admin'])
 def admin_panel(message):
@@ -158,7 +120,6 @@ def admin_panel(message):
 
     bot.send_message(message.chat.id,"Admin panel",reply_markup=kb)
 
-
 @bot.message_handler(func=lambda m:m.text=="📊 Statistika")
 def stats(message):
 
@@ -169,7 +130,6 @@ def stats(message):
     mods = cur.fetchone()[0]
 
     bot.send_message(message.chat.id,f"Userlar: {users}\nModlar: {mods}")
-
 
 @bot.message_handler(func=lambda m:m.text=="👥 Foydalanuvchilar")
 def users_list(message):
@@ -186,7 +146,6 @@ def users_list(message):
 
     bot.send_message(message.chat.id,text)
 
-
 @bot.message_handler(func=lambda m:m.text=="👑 Adminlar")
 def admins(message):
 
@@ -201,7 +160,6 @@ def admins(message):
 
     bot.send_message(message.chat.id,text)
 
-
 @bot.message_handler(func=lambda m:m.text=="➕ Admin qo'shish")
 def add_admin(message):
 
@@ -209,18 +167,12 @@ def add_admin(message):
 
     bot.register_next_step_handler(msg,save_admin)
 
-
 def save_admin(message):
 
-    cur.execute(
-        "INSERT INTO admins VALUES(%s) ON CONFLICT DO NOTHING",
-        (int(message.text),)
-    )
-
+    cur.execute("INSERT OR IGNORE INTO admins VALUES(?)",(int(message.text),))
     db.commit()
 
     bot.send_message(message.chat.id,"Admin qo'shildi")
-
 
 @bot.message_handler(func=lambda m:m.text=="➕ Kanal qo'shish")
 def add_channel(message):
@@ -229,18 +181,12 @@ def add_channel(message):
 
     bot.register_next_step_handler(msg,save_channel)
 
-
 def save_channel(message):
 
-    cur.execute(
-        "INSERT INTO channels(username) VALUES(%s)",
-        (message.text,)
-    )
-
+    cur.execute("INSERT INTO channels(username) VALUES(?)",(message.text,))
     db.commit()
 
     bot.send_message(message.chat.id,"Kanal qo'shildi")
-
 
 @bot.message_handler(func=lambda m:m.text=="➕ Mod qo'shish")
 def add_mod(message):
@@ -248,7 +194,6 @@ def add_mod(message):
     msg = bot.send_message(message.chat.id,"Mod kodini yuboring")
 
     bot.register_next_step_handler(msg,mod_code)
-
 
 def mod_code(message):
 
@@ -258,7 +203,6 @@ def mod_code(message):
 
     bot.register_next_step_handler(msg,mod_photo,code)
 
-
 def mod_photo(message,code):
 
     photo=message.photo[-1].file_id
@@ -266,7 +210,6 @@ def mod_photo(message,code):
     msg = bot.send_message(message.chat.id,"Tavsif yuboring")
 
     bot.register_next_step_handler(msg,mod_text,code,photo)
-
 
 def mod_text(message,code,photo):
 
@@ -276,27 +219,65 @@ def mod_text(message,code,photo):
 
     bot.register_next_step_handler(msg,mod_file,code,photo,text)
 
-
 def mod_file(message,code,photo,text):
 
     file_id=message.document.file_id
 
     cur.execute(
-        "INSERT INTO mods VALUES(%s,%s,%s,%s) ON CONFLICT (code) DO UPDATE SET photo=%s,text=%s,file=%s",
-        (code,photo,text,file_id,photo,text,file_id)
+        "INSERT OR REPLACE INTO mods VALUES(?,?,?,?)",
+        (code,photo,text,file_id)
     )
 
     db.commit()
 
     bot.send_message(message.chat.id,"Mod qo'shildi")
 
+@bot.message_handler(func=lambda m:m.text=="🗑 Mod o'chirish")
+def del_mod(message):
+
+    msg = bot.send_message(message.chat.id,"Mod kodini yuboring")
+
+    bot.register_next_step_handler(msg,delete_mod)
+
+def delete_mod(message):
+
+    cur.execute(
+        "DELETE FROM mods WHERE code=?",
+        (int(message.text),)
+    )
+
+    db.commit()
+
+    bot.send_message(message.chat.id,"Mod o'chirildi")
+
+@bot.message_handler(func=lambda m:m.text=="📢 Broadcast")
+def broadcast(message):
+
+    msg = bot.send_message(message.chat.id,"Xabar yuboring")
+
+    bot.register_next_step_handler(msg,send_all)
+
+def send_all(message):
+
+    cur.execute("SELECT id FROM users")
+
+    users=cur.fetchall()
+
+    for u in users:
+
+        try:
+            bot.send_message(u[0],message.text)
+        except:
+            pass
+
+    bot.send_message(message.chat.id,"Yuborildi")
 
 @bot.message_handler(func=lambda m:m.text.isdigit())
 def send_mod(message):
 
     code=int(message.text)
 
-    cur.execute("SELECT photo,text,file FROM mods WHERE code=%s",(code,))
+    cur.execute("SELECT photo,text,file FROM mods WHERE code=?",(code,))
 
     mod = cur.fetchone()
 
@@ -311,29 +292,24 @@ def send_mod(message):
 
     bot.send_document(message.chat.id,file_id)
 
-
-@app.route('/'+TOKEN,methods=['POST'])
+@app.route('/'+TOKEN, methods=['POST'])
 def webhook():
 
-    json_str=request.get_data().decode('UTF-8')
+    json_str = request.get_data().decode('UTF-8')
 
-    update=telebot.types.Update.de_json(json_str)
+    update = telebot.types.Update.de_json(json_str)
 
     bot.process_new_updates([update])
 
-    return "ok",200
-
+    return "ok", 200
 
 @app.route('/')
 def index():
-
     return "Bot ishlayapti"
-
 
 bot.remove_webhook()
 
 bot.set_webhook(url="https://minecraft-mod-3.onrender.com/"+TOKEN)
 
-if __name__=="__main__":
-
-    app.run(host="0.0.0.0",port=10000)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
