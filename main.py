@@ -1,6 +1,5 @@
 import telebot
 from telebot import types
-import psycopg2
 import os
 import time
 from flask import Flask, request
